@@ -1,1 +1,1 @@
-# PSU_STAT555_ATAC-Seq_RNA-Seq
+# Procedures and pipelines for analyzing ATAC-Seq and RNA-Seq data for STAT555
