@@ -1,0 +1,225 @@
+---
+title: "ATAC_Seq"
+author: "Sofia Roitman"
+date: "4/18/2019"
+output: html_document
+---
+
+```{r}
+# Load DiffBind
+library(DiffBind)
+
+# Set working directory
+setwd("")
+```
+
+# Create DBA object and add peak data
+```{r}
+# First, create the object using one of the samples
+# DBA is set to null since we are not adding the sample to an existing object
+peaks <- dba.peakset(DBA=NULL, peaks = "./ENCFF181AMY.bed", sampID = "ENCFF181AMY", tissue = "Erythroblast", replicate = "1", peak.caller = "macs", peak.format = "bed", bamReads = "ENCFF199ZJX.bam")
+
+# Add peaks individually to the object we made above (there's probably a faster way to do this but IDK)
+peaks <- dba.peakset(DBA=peaks, peaks = "./ENCFF616EWK.bed", sampID = "ENCFF616EWK", tissue = "Erythroblast", replicate = "2", peak.caller = "macs", peak.format = "bed", bamReads = "ENCFF535OJU.bam")
+peaks <- dba.peakset(DBA=peaks, peaks = "./ENCFF255IVU.bed", sampID = "ENCFF255IVU", tissue = "HSC", replicate = "1", peak.caller = "macs", peak.format = "bed", bamReads = "ENCFF958EPJ.bam")
+peaks <- dba.peakset(DBA=peaks, peaks = "./ENCFF662DYG.bed", sampID = "ENCFF662DYG", tissue = "HSC", replicate = "2", peak.caller = "macs", peak.format = "bed", bamReads = "ENCFF250YAL.bam")
+peaks <- dba.peakset(DBA=peaks, peaks = "./ENCFF343PTQ.bed", sampID = "ENCFF343PTQ", tissue = "CMP", replicate = "1", peak.caller = "macs", peak.format = "bed", bamReads = "ENCFF620WGW.bam")
+peaks <- dba.peakset(DBA=peaks, peaks = "./ENCFF832UUS.bed", sampID = "ENCFF832UUS", tissue = "CMP", replicate = "2", peak.caller = "macs", peak.format = "bed", bamReads = "ENCFF711QAL.bam")
+peaks <- dba.peakset(DBA=peaks, peaks = "./ENCFF599ZDJ.bed", sampID = "ENCFF599ZDJ", tissue = "CFU-E", replicate = "1", peak.caller = "macs", peak.format = "bed", bamReads = "ENCFF780SSI.bam")
+peaks <- dba.peakset(DBA=peaks, peaks = "./ENCFF796ZSB.bed", sampID = "ENCFF796ZSB", tissue = "CFU-E", replicate = "2", peak.caller = "macs", peak.format = "bed", bamReads = "ENCFF909QFQ.bam")
+
+
+# Look at DBA object "peaks"" to make sure it has all replicates
+peaks
+```
+
+
+# Correlation heatmap - prelim
+## Initial clustering of the samples using the cross-correlations of each row of the binding matrix
+```{r}
+# Plot heatmap
+corr_heat <- plot(peaks)
+
+# Visualize
+corr_heat
+```
+
+# Count reads
+```{r}
+# dba.count function to count reads
+peaks_counts <- dba.count(peaks, summits=250)
+
+# Plot heatmap
+count_plot <- plot(peaks_counts)
+
+# Visualize
+count_plot
+
+
+# Plot PCA
+count_pca <- dba.plotPCA(peaks_counts, DBA_TISSUE)
+
+# Visualize
+count_pca
+
+```
+
+# Establishing contrast
+## Tell DiffBind that we will be comparing between cell lines
+```{r}
+peaks_groups <- dba.contrast(peaks_counts, categories=DBA_TISSUE, minMembers = 2)
+```
+
+# Perform the differential analysis
+```{r}
+peaks_diff <- dba.analyze(peaks_groups)
+
+# Take a look at resulting file
+peaks_diff
+```
+
+Results:
+
+2x4 (CMP x Ery): 89064 significantly differentially bound (DB) sites (out of 115523)
+1x2 (HSC x CMP): 63047
+2x3 (CMP x CFU-E): 86938
+
+
+# EXPLORATORY: Plot results of differential analysis
+```{r}
+# I am setting contrast to 2 because I want to plot the second pair on the list (Ery v CMP)
+plot(peaks_diff, contrast=2)
+
+# Plot all
+plot(peaks_diff)
+
+# MA plot
+dba.plotMA(peaks_diff, contrast=2)
+
+```
+
+# Retrieve the differentially bound sites
+```{r}
+# Extract significantly differentially accessible cites by cell line pair
+peaks2x4.DB <- dba.report(peaks_diff, contrast = 2, th=.05, fold=2)
+peaks1x4.DB <- dba.report(peaks_diff, contrast = 1, th=.05, fold=2)
+peaks3x4.DB <- dba.report(peaks_diff, contrast = 3, th=.05, fold=2)
+
+# Extract just the differentially accessible sites for later GO analysis
+peaks3x4_NonSig.DB <- dba.report(peaks_diff, contrast = 3)
+peaks2x4_NonSig.DB <- dba.report(peaks_diff, contrast = 2)
+peaks1x4_NonSig.DB <- dba.report(peaks_diff, contrast = 1)
+
+# Extract all significantly differentially accessible sites
+all.DB <- dba.report(peaks_diff, th=.05, fold=2)
+
+# Take a look at all
+all.DB
+peaks1x4.DB
+peaks2x4.DB
+peaks3x4.DB
+
+```
+
+# Annotation with ChIPseeker
+```{r}
+library(ChIPseeker)
+```
+
+# EXPLORATORY: Peaks coverage plot
+```{r}
+covplot(peaks2x4.DB)
+covplot(peaks1x4.DB)
+covplot(peaks3x4.DB)
+
+```
+
+# Peak annotation
+```{r}
+# Load in mouse database
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+txdb <- TxDb.Mmusculus.UCSC.mm10.knownGene
+
+# Annotate significantly accessible sites by cell pair
+peakAnno_2x4 <- annotatePeak(peaks2x4.DB, tssRegion=c(-3000, 3000), TxDb = txdb, annoDb = "org.Mm.eg.db")
+peakAnno_1x4 <- annotatePeak(peaks1x4.DB, tssRegion = c(-3000, 3000), TxDb = txdb, annoDb = "org.Mm.eg.db")
+peakAnno_3x4 <- annotatePeak(peaks3x4.DB, tssRegion = c(-3000, 3000), TxDb = txdb, annoDb = "org.Mm.eg.db")
+
+# Annontate just the differentially accessible sites
+peaksAnn_3x4_NonSig <- annotatePeak(peaks3x4_NonSig.DB, tssRegion = c(-3000, 3000), TxDb = txdb, annoDb = "org.Mm.eg.db")
+peaksAnn_2x4_NonSig <- annotatePeak(peaks2x4_NonSig.DB, tssRegion = c(-3000, 3000), TxDb = txdb, annoDb = "org.Mm.eg.db")
+peaksAnn_1x4_NonSig <- annotatePeak(peaks1x4_NonSig.DB, tssRegion = c(-3000, 3000), TxDb = txdb, annoDb = "org.Mm.eg.db")
+
+```
+
+# Visualize annotation
+```{r}
+# Ery v CMP
+plotAnnoPie(peakAnno_2x4)
+vennpie(peakAnno_2x4)
+upsetplot(peakAnno_2x4)
+upsetplot(peakAnno_2x4, vennpie=TRUE)
+
+# Ery v HSC
+plotAnnoPie(peakAnno_1x4)
+vennpie(peakAnno_1x4)
+upsetplot(peakAnno_1x4)
+upsetplot(peakAnno_1x4, vennpie=TRUE)
+
+# Ery v CFU-E
+plotAnnoPie(peakAnno_3x4)
+vennpie(peakAnno_3x4)
+upsetplot(peakAnno_3x4)
+upsetplot(peakAnno_3x4, vennpie=TRUE)
+
+```
+
+# EXPLORATORY: Distribution of TF-binding loci relative to TSS
+```{r}
+plotDistToTSS(peakAnno, title="Distribution of transcription factor-binding loci\nrelative to TSS")
+```
+
+# Export gene IDs for functional enrichment analysis
+```{r}
+# Significant
+geneids_2x4 <- as.data.frame(peakAnno_2x4)$geneId
+write.table(geneids_2x4, "./geneids_2x4.txt", sep="\t", row.names = FALSE)
+
+geneids_1x4 <- as.data.frame(peakAnno_1x4)$geneId
+write.table(geneids_1x4, "./geneids_1x4.txt", sep="\t", row.names = FALSE)
+
+geneids_3x4 <- as.data.frame(peakAnno_3x4)$geneId
+write.table(geneids_3x4, "./geneids_3x4.txt", sep="\t", row.names = FALSE)
+
+
+# Just differentially bound
+geneids_3x4_nonsig <- as.data.frame(peaksAnn_3x4_NonSig)$geneId
+write.table(geneids_3x4_nonsig, "./geneids_3x4_nonsig.txt", sep="\t", row.names = FALSE)
+
+geneids_2x4_nonsig <- as.data.frame(peaksAnn_2x4_NonSig)$geneId
+write.table(geneids_2x4_nonsig, "./geneids_2x4_nonsig.txt", sep="\t", row.names = FALSE)
+
+geneids_1x4_nonsig <- as.data.frame(peaksAnn_1x4_NonSig)$geneId
+write.table(geneids_1x4_nonsig, "./geneids_1x4_nonsig.txt", sep="\t", row.names = FALSE)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

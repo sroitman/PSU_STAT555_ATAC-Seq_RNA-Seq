@@ -1,0 +1,224 @@
+---
+title: "Differential Expression - Microarrays"
+author: "Sofia Roitman"
+date: "Mar. 24, 2019"
+output:
+  html_document: default
+  pdf_document: default
+e-mail: sxr410@psu.edu
+---
+
+## Preparations
+```{r,message=FALSE}
+rm(list=ls(all=TRUE));
+require(hexbin)
+require(affy)
+require(limma)
+require(qvalue)
+require(stats)
+```
+
+
+DATA: gene expression data from Khaitovich et al (2004) for 7 homologous regions of human (n = 3) and chimpanzee (n = 3) brains. T
+
+Samples are available as experiment E-AFMX-2 at
+http://www.ebi.ac.uk//aerep//dataselection//?expid=352682122.  
+
+4 of the brain regions were used for this exercise: prefrontal cortex, caudate nucleus, cerebellum and Broca's region and only one of the Genechips, hgu95b with one hybridization per sample.
+
+Read the cel files into an AffyBatch object called **brainBatch**.  
+
+```{r}
+celPath=""
+brainBatch=ReadAffy(celfile.path=celPath)
+```
+
+# Print sample names, then replace
+```{r}
+sampleNames(brainBatch)
+sampleNames(brainBatch) <- 
+  paste(rep(c("CH","HU"),each=12),rep(c(1:3,1:3),each=4),
+  rep(c("Prefrontal","Caudate","Cerebellum","Broca"),6),sep="")
+sampleNames(brainBatch)
+```
+
+## EDA and Normalization
+
+# Check quality
+```{r}
+# List names
+sampleNames(brainBatch)
+
+# Caudate
+Caudate=log2(exprs(brainBatch[,c(2,6,10,14,18,22)]))
+plot(hexplom(Caudate))
+
+# Cerebellum
+Cerebellum=log2(exprs(brainBatch[,c(3,7,11,15,19,23)]))
+plot(hexplom(Cerebellum))
+
+# Broca
+Broca=log2(exprs(brainBatch[,c(4,8,12,16,20,24)]))
+plot(hexplom(Broca))
+
+```
+
+# Set up treatment names and blocks
+```{r}
+# a)
+blocks <- sampleNames(brainBatch)
+blocks <- factor(paste(rep(c("CH", "HU"),each=12),rep(c(1:3,1:3),each=4)))
+blocks
+
+
+# b)
+trts <- sampleNames(brainBatch)
+trts <- factor(paste(rep(c("CH","HU"),each=12),
+  rep(c("Prefrontal","Caudate","Cerebellum","Broca"),6),sep=""))
+trts
+
+```
+
+# Normalize expression values and combine into probeset expression summaries
+```{r}
+# a)
+brain.rma <- rma(brainBatch)
+brainBatch
+
+# b)
+nrow(brain.rma)
+# 12625 probesets
+
+# c)
+# Caudate
+Caudate1=exprs(brain.rma[,c(2,6,10,14,18,22)])
+plot(hexplom(Caudate1))
+
+# Cerebellum
+Cerebellum1=exprs(brain.rma[,c(3,7,11,15,19,23)])
+plot(hexplom(Cerebellum1))
+
+# Broca
+Broca1=exprs(brain.rma[,c(4,8,12,16,20,24)])
+plot(hexplom(Broca1))
+
+# Prefrontal
+Prefrontal1=exprs(brain.rma[,c(1,5,9,13,17,21)])
+plot(hexplom(Prefrontal1))
+
+
+```
+
+# Compute pooled variance
+
+## Set up design matrix
+```{r}
+design.trt <- model.matrix(~0+trts)
+```
+
+## Compute correlation of genes within blocks
+```{r}
+# statmod package is required, however the requirement was not listed above. Installing now.
+library(statmod)
+corfit <- duplicateCorrelation(brain.rma, design.trt, block = blocks)
+```
+
+## Plot histogram of intraclass correlations
+```{r}
+hist(tanh(corfit$atanh.correlations))
+corfit$consensus.correlation
+
+```
+
+## Compute pooled sample variance for each gene
+```{r}
+fitTrtMean <- lmFit(brain.rma, design.trt, block = blocks, 
+                    cor = corfit$consensus.correlation)
+fitTrtMean
+```
+
+## Draw histograms of the first coefficient and estimated pooled variance
+```{r}
+hist(fitTrtMean$coefficients[,1])
+
+hist(fitTrtMean$sigma, nclass=100)
+
+```
+
+# Create contrast matrix for all 3 contrasts
+```{r}
+colnames(design.trt)
+contrast.matrix=makeContrasts(
+  ChVsHu=(trtsCHBroca+trtsCHCaudate+trtsCHCerebellum+trtsCHPrefrontal)/4
+  -(trtsHUBroca+trtsHUCaudate+trtsHUCerebellum+trtsHUPrefrontal)/4,
+  (trtsCHCerebellum+trtsHUCerebellum)/2-(trtsHUBroca+trtsCHBroca)/2,
+  (trtsCHCerebellum-trtsHUCerebellum)-(trtsCHBroca-trtsHUBroca),
+  levels=design.trt)
+
+```
+
+
+# Compute the estimated contrasts and compute the moderated t-tests for each contrast.
+## Fit the contrast matrix to the previous fitted model:
+```{r}
+fit.contrast=contrasts.fit(fitTrtMean,contrast.matrix)
+```
+
+# Compute empirical Bayes pooled variance
+```{r}
+efit.contrast=eBayes(fit.contrast)
+```
+
+
+**d) For the contrast in part c, which probeset has the largest absolute difference in mean(log(expression))?  What is the estimated fold change for this gene?  Is it up or down regulated in cerebellum compared to Broca's region? **
+
+**e) What is the p-value associated with this probeset for the contrast between cerebellum and Broca's region?**
+
+# Plot sample variances
+```{r}
+plot(efit.contrast$sigma,efit.contrast$s2.post)
+abline(0,0.85)
+```
+
+# Plot histogram of estimated value of the contrast coefficient for the contrast between cerebellum and Broca's region, calculate largest absolute difference in mean(log(expression)) and estimated fold change for the gene + p-value associated with the probeset
+```{r}
+colnames(efit.contrast$coefficients)
+hist(efit.contrast$coefficients[,2],main=colnames(efit.contrast$coefficients)[2])
+
+absc=abs(efit.contrast$coefficients[,2])
+maxc=max(absc)
+index=which(absc==maxc)
+rownames(efit.contrast$coefficients)[index]
+2^maxc
+
+efit.contrast[index,2]
+#p-value: 9.966758e-23
+
+```
+
+# Estimate q-values for each contrast
+```{r}
+# a)
+q1 = qvalue(efit.contrast$p.value[,1], fdr.level = 0.05)
+q2 = qvalue(efit.contrast$p.value[,2], fdr.level = 0.05)
+q3 = qvalue(efit.contrast$p.value[,3], fdr.level = 0.05)
+
+q1$pi0
+q2$pi0
+q3$pi0
+
+summary(q1)
+summary(q2)
+summary(q3)
+
+```
+
+---
+<br>
+<br>
+<br>
+<br>
+
+
+
+
